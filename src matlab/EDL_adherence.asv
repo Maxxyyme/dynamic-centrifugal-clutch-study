@@ -1,0 +1,32 @@
+%%%% 2 équations de mouvement d'ordre 2 à intégrer en phase d'approche 
+%%%% donc 4 équations du premier ordre Q = [psi2 x psi2' x']
+
+function dQn = EDL_adherence(tn,Qn,data)
+
+%%%% Récupération des données numériques utiles
+C2 = data.C2;
+m3 = data.m3;
+a3 = data.a3;
+k  = data.k;
+L  = data.L;
+L0 = data.L0;
+R2 = data.R2;
+f = data.f;
+R3 = data.R3;
+
+%%%% mouvement imposé
+[psi1,dpsi1,ddpsi1] = mvt_imp(tn);
+
+%%%% couple résistant 
+Cr = couple_resistant(tn); 
+
+%%%% valeur des paramètres à l'instant courant 
+psi2  = Qn(1);
+dpsi2 = Qn(2);
+
+%%%% système différentiel 
+M  = 1;
+U  = (1);
+ff = dpsi2;
+F  = [dpsi1];
+dQn = U\F;

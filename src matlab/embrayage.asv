@@ -1,0 +1,386 @@
+%%%% Etude dynamique de l'embrayage centrifuge en phase d'approche
+
+clear
+close all
+
+%%%% Grandeurs géométriques (unités S.I.)
+R2 = 115e-3;
+R3 = 110e-3;
+R4 = 110e-3;
+L  = 39.5e-3;
+
+%%%% Géométrie des masses (unités S.I.)
+m1 = 5.38;
+C1 = 8.989e-3;
+
+m2 = 9.799;
+C2 = 53.873e-3;
+
+m3 = 1.723;
+C3 = 4.552e-3;
+a3 = 69.48e-3;
+
+%%%% Ressort (unités S.I.)
+k  = 88.5e3;
+L0 = 79e-3;
+
+%%%% Frottement (unités S.I.)
+f = 0.3;
+
+%%%% Sauvegarde des valeurs numériques dans la structure data
+data = struct('R2',R2,'R3',R3,'R4',R4,'L',L,'m1',m1,'C1',C1,'m2',m2,'C2',C2,'m3',m3,'C3',C3,'a3',a3,'k',k,'L0',L0,'f',f);
+
+%%%% phase de départ (1 = approche, 2 = glissement, 3 = adhérence)
+phase = 1;
+
+%%%% définition de la durée de l'analyse
+tstart = 0;
+tfinal = 120;
+
+%%%% Initialisation des vecteurs de stockage des résultats
+resultats.t = tstart; % initialisation du vecteur des instants
+
+CI = zeros(4,1); % conditions initiales correspondant à Q(t=tstart) : [psi2 x psi2' x'] = O // Il s'agit d'une matrice colonne de 0 de taille 4x1 // x = x3
+
+resultats.psi2   = CI(1); % tableau de sauvegarde stockant psi2. On initialise avec les valeurs à t = 0
+resultats.x      = CI(2);  % tableau de sauvegarde stockant x. On initialise avec les valeurs à t = 0
+resultats.dpsi2  = CI(3); % tableau de sauvegarde stockant psi2'. On initialise avec les valeurs à t = 0
+resultats.dx     = CI(4); % tableau de sauvegarde stockant x'. On initialise avec les valeurs à t = 0
+resultats.ddpsi2 = 0; % tableau de sauvegarde stockant psi2". On initialise à 0 (attention, cette quantité doit être calculée si le couple résistant n'est pas nul à t=0)
+resultats.ddx    = 0; % tableau de sauvegarde stockant x". On initialise à 0 (attention, cette quantité doit être calculée si le couple résistant n'est pas nul à t=0)
+
+[psi1_0, dpsi1_0, ddpsi1_0] = mvt_imp(0); % Calcul du mouvement imposé à t = 0 (valeurs de psi1, psi1', psi1")
+
+resultats.psi1   = psi1_0; % Stockage des valeurs du mouvement imposé à t=0 (valeur de psi1)
+resultats.dpsi1  = dpsi1_0; % Stockage des valeurs du mouvement imposé à t=0 (valeur de psi1')
+resultats.ddpsi1 = ddpsi1_0; % Stockage des valeurs du mouvement imposé à t=0 (valeur de psi1")
+
+resultats.Cm = (C1+2*C3+2*m3*(a3+CI(2))^2)*ddpsi1_0; % Stockage de la valeur du couple moteur à t = 0
+
+resultats.Cr = couple_resistant(0); % Stockage de la valeur du couple résistant à t = 0;
+
+resultats.X23 = 0; % Stockage de la valeurs de l'effort de contact X23 à t=0
+resultats.Y23 = 0; % Stockage de la valeurs de l'effort de contact Y23 à t=0
+
+%%%% initialisation des vecteurs te_out, Qe_out et ie_out finaux
+resultats.te = []; % instants de fins de phases
+resultats.Qe = []; % valeurs du vecteur d'état Q en fins de phases
+resultats.ie = []; % valeurs des indices des évènements de fins de phases
+
+
+% while tstart < tfinal
+
+
+if phase == 1
+
+    disp('phase 1 : approche')
+
+    %%%% options pour la résolution de la phase d'approche
+    options_approche = odeset('Events',@(t,Q) events_approche(t,Q,data),'RelTol',1e-10,'AbsTol',1e-10); %% Events est l'évènement de la condition d'arrêt
+
+    %%%% résolution du système différentiel de la phase d'approche (2 équations de mvt d'ordre 2 à intégrer)
+    [t,Q,te,Qe,ie] = ode45(@(t,Q) eqmvt_approche(t,Q,data),[tstart tfinal],CI,options_approche); %% CI doit etre de la meme taille que le vecteur a integré // le vecteur t correspond aux instants d'intégration de la phase d'approche // le vecteur te corresponds aux instants ou ya eu un event
+                                                                                                    %%ie c'est l'indice des conditions d'arrêt qui ont été détectées // conditions d'arrêt numéro 1 puis au cours de l'intégration c'est la numéro 2 par exemple, ie a donc la même taille que te
+    nt = length(t); % nombre de composantes du vecteur t après intégration
+
+    %%%% stockage des résultats
+    resultats.t     = [resultats.t     ; t(2:nt)  ]; % Concaténation du vecteur de temps // On commence a 2 car on prend pas la première qui a déja été calculé
+    resultats.psi2  = [resultats.psi2  ; Q(2:nt,1)]; % Concaténation psi2
+    resultats.x     = [resultats.x     ; Q(2:nt,2)]; % Concaténation x
+    resultats.dpsi2 = [resultats.dpsi2 ; Q(2:nt,3)]; % Concaténation psi2'
+    resultats.dx    = [resultats.dx    ; Q(2:nt,4)]; % Concaténation x'
+
+    %%%% stockage du mouvement d'entrée
+    [psi1,dpsi1,ddpsi1] = compilation_mvt_entree(t);
+   
+    resultats.psi1   = [resultats.psi1   ; psi1(2:nt)  ]; % Stockage : concaténation des valeurs de psi1
+    resultats.dpsi1  = [resultats.dpsi1  ; dpsi1(2:nt) ]; % Stockage : concaténation des valeurs de psi1'
+    resultats.ddpsi1 = [resultats.ddpsi1 ; ddpsi1(2:nt)]; % Stockage : concaténation des valeurs de psi1"
+
+    %%%% stockage du vecteur Cr
+    Cr = compilation_Cr(t);
+    
+    resultats.Cr = [resultats.Cr ; Cr(2:nt)]; % Concaténation
+
+    %%%% calcul des accélérations [psi2" x"] à partir des résultats de l'intégration temporelle
+    acc = acc_approche(t,Q,dpsi1,Cr,data);
+    
+    resultats.ddpsi2 = [resultats.ddpsi2 ; acc(2:nt,1)]; % Concaténation psi2"
+    resultats.ddx    = [resultats.ddx    ; acc(2:nt,2)]; % Concaténation x"
+
+    %%%% concaténation du vecteur Cm
+    Cm = Cm_approche(t,Q,dpsi1,ddpsi1,data);
+    
+    resultats.Cm = [resultats.Cm ; Cm(2:nt)];
+
+    %%%% concaténation des efforts X23 et Y23
+    resultats.X23 = [resultats.X23 ; zeros(nt-1,1)];
+    resultats.Y23 = [resultats.Y23 ; zeros(nt-1,1)];
+
+    %%%% concaténation du vecteur des dates où ont lieu les évènements
+    resultats.te = [resultats.te; te];
+
+    %%%% concaténation du vecteur des indices des fonctions évènements
+    resultats.ie = [resultats.ie; ie];
+
+    if ~(isempty(ie) || abs(te(end)-tstart)<1e-8)  % s'il y a eu un évènement (autre qu'aux conditions initiales) // tild est l'opérateur de négation // LES deux barres c'est ET PAS SUR
+        if ie(end) == 1 % si x3 = R2 - R3
+            phase = 2;    % alors phase de glissement
+        end
+    end
+
+    %%%% définition du nouveau tstart pour la phase suivante
+    tstart = t(nt);
+
+    %%%% définition des nouvelles conditions initiales pour la phase suivante
+    CI = Q(nt,:).';
+end
+
+if phase == 2
+
+    disp('phase 2 : glissement')
+    
+    
+    CI = [CI(1),CI(3)];
+    
+    
+    %%%% options pour la résolution de la phase d'approche
+    options_glissement = odeset('Events',@(t,Q) events_glissement(t,Q,data),'RelTol',1e-10,'AbsTol',1e-10); %% Events est l'évènement de la condition d'arrêt
+
+    %%%% résolution du système différentiel de la phase d'approche (2 équations de mvt d'ordre 2 à intégrer)
+    [t,Q,te,Qe,ie] = ode45(@(t,Q) eqmvt_glissement(t,Q,data),[tstart tfinal],CI,options_glissement); %% CI doit etre de la meme taille que le vecteur a integré // le vecteur t correspond aux instants d'intégration de la phase d'approche // le vecteur te corresponds aux instants ou ya eu un event
+                                                                                                    %%ie c'est l'indice des conditions d'arrêt qui ont été détectées // conditions d'arrêt numéro 1 puis au cours de l'intégration c'est la numéro 2 par exemple, ie a donc la même taille que te
+    nt = length(t); % nombre de composantes du vecteur t après intégration
+    
+
+    %%%% stockage des résultats
+    resultats.t     = [resultats.t     ; t(2:nt)  ]; % Concaténation du vecteur de temps // On commence a 2 car on prend pas la première qui a déja été calculé
+    resultats.psi2  = [resultats.psi2  ; Q(2:nt,1)]; % Concaténation psi2
+    resultats.x     = [resultats.x     ; ones(nt-1,1).*(R2-R3)]; % Concaténation x
+    resultats.dpsi2     = [resultats.dpsi2     ; Q(2:nt,2)]; % Concaténation psi2'
+    resultats.dx    = [resultats.dx    ; zeros(nt-1,1)]; % Concaténation x'
+
+
+    %%%% stockage du mouvement d'entrée
+    [psi1,dpsi1,ddpsi1] = compilation_mvt_entree(t);
+   
+    resultats.psi1   = [resultats.psi1   ; psi1(2:nt)  ]; % Stockage : concaténation des valeurs de psi1
+    resultats.dpsi1  = [resultats.dpsi1  ; dpsi1(2:nt) ]; % Stockage : concaténation des valeurs de psi1'
+    resultats.ddpsi1 = [resultats.ddpsi1 ; ddpsi1(2:nt)]; % Stockage : concaténation des valeurs de psi1"
+
+    %%%% stockage du vecteur Cr
+    Cr = compilation_Cr(t);
+    
+    resultats.Cr = [resultats.Cr ; Cr(2:nt)]; % Concaténation
+
+     %%%% calcul des accélérations [psi2"] à partir des résultats de l'intégration temporelle
+     acc = acc_glissement(t,Q,dpsi1,Cr,data);
+%     
+     resultats.ddpsi2 = [resultats.ddpsi2 ; acc(2:nt,1)]; % Concaténation psi2"
+     resultats.ddx    = [resultats.ddx    ; zeros(nt-1,1)]; % Concaténation x"
+% 
+     %%%% concaténation du vecteur Cm
+     Cm = Cm_glissement(t,Q,dpsi1,ddpsi1,data);
+%     
+     resultats.Cm = [resultats.Cm ; Cm(2:nt)];
+
+     [X23,Y23] = efforts_glissement(t,Q,dpsi1,ddpsi1,data);
+%     %%%% concaténation des efforts X23 et Y23
+     resultats.X23 = [resultats.X23 ; X23(2:nt)];
+     resultats.Y23 = [resultats.Y23 ; Y23(2:nt)];
+% 
+%     %%%% concaténation du vecteur des dates où ont lieu les évènements
+     resultats.te = [resultats.te; te];
+% 
+%     %%%% concaténation du vecteur des indices des fonctions évènements
+     resultats.ie = [resultats.ie; ie];
+% 
+    if ~(isempty(ie) || abs(te(end)-tstart)<1e-8)  % s'il y a eu un évènement (autre qu'aux conditions initiales) // tild est l'opérateur de négation // LES deux barres c'est ET PAS SUR
+        if ie(end) == 1 % si x3 = R2-R3
+            phase = 2;    % alors phase de glissement
+        else % si X23=0 si dpsi1 - dpsi2 = 0
+            phase = 3;    % alors phase de glissement
+        end
+    end
+
+    %%%% définition du nouveau tstart pour la phase suivante
+    tstart = t(nt);
+
+    %%%% définition des nouvelles conditions initiales pour la phase suivante
+    CI = [Q(nt, 1), R2-R3, Q(nt,2), 0];
+end
+ 
+if phase == 3
+
+    disp('phase 3 : adhérence')
+    
+    CI = CI(1);
+    
+    
+    %%%% options pour la résolution de la phase d'approche
+    options_adherence = odeset('Events',@(t,Q) events_adherence(t,Q,data),'RelTol',1e-10,'AbsTol',1e-10); %% Events est l'évènement de la condition d'arrêt
+
+%     %%%% résolution du système différentiel de la phase d'approche (2 équations de mvt d'ordre 2 à intégrer)
+    [t,Q,te,Qe,ie] = ode45(@(t,Q) EDL_adherence(t,Q,data),[tstart tfinal],CI,options_adherence); %% CI doit etre de la meme taille que le vecteur a integré // le vecteur t correspond aux instants d'intégration de la phase d'approche // le vecteur te corresponds aux instants ou ya eu un event
+                                                                                                    %%ie c'est l'indice des conditions d'arrêt qui ont été détectées // conditions d'arrêt numéro 1 puis au cours de l'intégration c'est la numéro 2 par exemple, ie a donc la même taille que te
+    nt = length(t); % nombre de composantes du vecteur t après intégration
+    
+     %%%% stockage du mouvement d'entrée
+     [psi1,dpsi1,ddpsi1] = compilation_mvt_entree(t);
+
+%     %%%% stockage des résultats
+     resultats.t     = [resultats.t     ; t(2:nt)  ]; % Concaténation du vecteur de temps // On commence a 2 car on prend pas la première qui a déja été calculé
+     resultats.psi2  = [resultats.psi2  ; Q(2:nt)]; % Concaténation psi2
+     resultats.x     = [resultats.x     ; ones(nt-1,1).*(R2-R3)]; % Concaténation x
+     resultats.dpsi2     = [resultats.dpsi2     ; dpsi1(2:nt)]; % Concaténation psi2'
+     resultats.dx    = [resultats.dx    ; zeros(nt-1,1)]; % Concaténation x'
+% 
+% 
+%    
+%    
+     resultats.psi1   = [resultats.psi1   ; psi1(2:nt)  ]; % Stockage : concaténation des valeurs de psi1
+     resultats.dpsi1  = [resultats.dpsi1  ; dpsi1(2:nt) ]; % Stockage : concaténation des valeurs de psi1'
+     resultats.ddpsi1 = [resultats.ddpsi1 ; ddpsi1(2:nt)]; % Stockage : concaténation des valeurs de psi1"
+% 
+%     %%%% stockage du vecteur Cr
+     Cr = compilation_Cr(t);
+%     
+     resultats.Cr = [resultats.Cr ; Cr(2:nt)]; % Concaténation
+% 
+%      %%%% calcul des accélérations [psi2"] à partir des résultats de l'intégration temporelle
+%      acc = acc_glissement(t,Q,dpsi1,Cr,data);
+% %     
+      resultats.ddpsi2 = [resultats.ddpsi2 ; acc(2:nt,1)]; % Concaténation psi2"
+      resultats.ddx    = [resultats.ddx    ; zeros(nt-1,1)]; % Concaténation x"
+% % 
+%      %%%% concaténation du vecteur Cm
+%      Cm = Cm_glissement(t,Q,dpsi1,ddpsi1,data);
+% %     
+%      resultats.Cm = [resultats.Cm ; Cm(2:nt)];
+% 
+%      [X23,Y23] = efforts_glissement(t,Q,dpsi1,ddpsi1,data);
+% %     %%%% concaténation des efforts X23 et Y23
+%      resultats.X23 = [resultats.X23 ; X23(2:nt)];
+%      resultats.Y23 = [resultats.Y23 ; Y23(2:nt)];
+% % 
+% %     %%%% concaténation du vecteur des dates où ont lieu les évènements
+%      resultats.te = [resultats.te; te];
+% % 
+% %     %%%% concaténation du vecteur des indices des fonctions évènements
+%      resultats.ie = [resultats.ie; ie];
+% % 
+%     if ~(isempty(ie) || abs(te(end)-tstart)<1e-8)  % s'il y a eu un évènement (autre qu'aux conditions initiales) // tild est l'opérateur de négation // LES deux barres c'est ET PAS SUR
+%         if ie(end) == 1 % si x3 = R2-R3
+%             phase = 2;    % alors phase de glissement
+%         else % si X23=0 si dpsi1 - dpsi2 = 0
+%             phase = 3;    % alors phase de glissement
+%         end
+%     end
+% 
+%     %%%% définition du nouveau tstart pour la phase suivante
+%     tstart = t(nt);
+% 
+%     %%%% définition des nouvelles conditions initiales pour la phase suivante
+%     CI = [Q(nt, 1), R2-R3, Q(nt,2), 0];
+end
+
+%end
+
+
+ %%%% Tracé de psi2  psi2' psi2"
+ figure
+ subplot(1,3,1)
+ plot(resultats.t,resultats.psi2,'linewidth',1.5)
+ title('$$\psi_2$$ en fonction du temps','Interpreter','latex')
+ xlabel('t')
+ ylabel('$$\psi_2$$','Interpreter','latex')
+grid on
+subplot(1,3,2)
+plot(resultats.t,resultats.dpsi2,'linewidth',1.5)
+title('$$\dot\psi_2$$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$\dot\psi_2$$','Interpreter','latex')
+grid on
+subplot(1,3,3)
+plot(resultats.t,resultats.ddpsi2,'linewidth',1.5)
+title('$$\ddot\psi_2$$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$\ddot\psi_2$$','Interpreter','latex')
+grid on
+
+
+%%%% Tracé de x x' x"
+figure
+subplot(1,3,1)
+plot(resultats.t,resultats.x,'linewidth',1.5)
+title('x en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('x')
+grid on
+subplot(1,3,2)
+plot(resultats.t,resultats.dx,'linewidth',1.5)
+title('$$\dot x $$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$\dot x $$','Interpreter','latex')
+grid on
+subplot(1,3,3)
+plot(resultats.t,resultats.ddx,'linewidth',1.5)
+title('$$\ddot x $$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$\ddot x $$','Interpreter','latex')
+grid on
+
+% %%%% Tracé de X23 et Y23
+figure
+subplot(1,2,1)
+plot(resultats.t,resultats.X23,'linewidth',1.5)
+title('Effort normal $$X_{23}$$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$X_{23}$$','Interpreter','latex')
+grid on
+subplot(1,2,2)
+plot(resultats.t,resultats.Y23,'linewidth',1.5)
+title('Effort tangentiel $$Y_{23}$$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$Y_{23}$$','Interpreter','latex')
+grid on
+
+%%%% tracé de la vitesse d'entrée et de la vitesse de sortie
+figure
+plot(resultats.t,resultats.dpsi2,'b',resultats.t,resultats.dpsi1,'r','linewidth',1.5)
+title('$$\dot\psi_2$$ et $$\dot\psi_1$$ en fonction du temps','Interpreter','latex')
+legend('dpsi2','dpsi1')
+xlabel('t')
+ylabel('$$\dot\psi$$','Interpreter','latex')
+grid on
+
+
+%%%% Tracé du couple moteur et du couple résistant
+figure
+plot(resultats.t,resultats.Cm,'b',resultats.t,resultats.Cr,'r','linewidth',1.5)
+legend('Cm','Cr')
+title('Cm et Cr en fonction du temps','Interpreter','latex')
+xlabel('t')
+grid on
+
+
+%%%% Tracé du mouvement d'entrée
+figure
+subplot(1,3,1)
+plot(resultats.t,resultats.psi1,'linewidth',1.5)
+title('$$\psi_1$$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$\psi_1$$','Interpreter','latex')
+grid on
+subplot(1,3,2)
+plot(resultats.t,resultats.dpsi1,'linewidth',1.5)
+title('$$\dot\psi_1$$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$\dot\psi_1$$','Interpreter','latex')
+grid on
+subplot(1,3,3)
+plot(resultats.t,resultats.ddpsi1,'linewidth',1.5)
+title('$$\ddot\psi_1$$ en fonction du temps','Interpreter','latex')
+xlabel('t')
+ylabel('$$\ddot\psi_1$$','Interpreter','latex')
+grid on
